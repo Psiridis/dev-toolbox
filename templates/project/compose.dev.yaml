@@ -1,0 +1,5 @@
+# Copy into the application repository. Replace the illustrative registry path.
+# The shared launcher merges this with its editor/SSH/runtime defaults.
+services:
+  dev:
+    image: ghcr.io/your-owner/dev-environment:0.1.0

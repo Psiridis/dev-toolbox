@@ -1,0 +1,70 @@
+name: Validate environment
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        node: ['false', 'true']
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Host checks
+        run: |
+          bash -n dev devcontainer/container/*.sh devcontainer/scripts/check-container.sh
+          python3 devcontainer/scripts/test-launcher.py
+      - name: Read version
+        id: version
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: devcontainer/Dockerfile
+          load: true
+          tags: dev-toolchain:ci
+          build-args: |
+            INSTALL_NODE=${{ matrix.node }}
+            IMAGE_VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.runner }}-${{ matrix.node }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.runner }}-${{ matrix.node }}
+      - name: Image checks
+        env:
+          EXPECT_NODE: ${{ matrix.node }}
+        run: |
+          docker run --rm --cap-add SYS_PTRACE dev-toolchain:ci dev-check
+          docker run --rm --mount "type=bind,source=$PWD,target=/workspace,readonly" \
+            -e PYTHONDONTWRITEBYTECODE=1 dev-toolchain:ci \
+            python3 /workspace/devcontainer/scripts/test-diagnose.py
+          docker run --rm -e EXPECT_NODE="$EXPECT_NODE" dev-toolchain:ci bash -c \
+            'if [[ $EXPECT_NODE == true ]]; then node --version && npm --version; else ! command -v node && ! command -v npm; fi'
+      - name: Shared launcher against an external workspace
+        run: |
+          work=$(mktemp -d)
+          trap './dev reset --yes --workspace "$work" --image dev-toolchain:ci --project-name ci-integration; rm -rf "$work"' EXIT
+          ./dev up --workspace "$work" --image dev-toolchain:ci --project-name ci-integration
+          ./dev check --workspace "$work" --image dev-toolchain:ci --project-name ci-integration
+          ./dev diagnose --workspace "$work" --image dev-toolchain:ci --project-name ci-integration
+          test -s "$work/.dev-reports/dev-report.txt"
+      - name: Linux identity mapping without modifying personal configuration
+        run: |
+          mkdir -p /tmp/personal-nvim
+          printf '%s\n' '-- test fixture' > /tmp/personal-nvim/init.lua
+          before=$(stat -c '%u:%g' /tmp/personal-nvim/init.lua)
+          mkdir -p /tmp/test-workspace
+          sudo chown 12345:12345 /tmp/test-workspace
+          docker run --rm -e DEV_HOST_UID=12345 -e DEV_HOST_GID=12345 \
+            --mount type=bind,source=/tmp/personal-nvim,target=/home/dev/.config/nvim,readonly \
+            --mount type=bind,source=/tmp/test-workspace,target=/workspace \
+            dev-toolchain:ci bash -c '[[ $(id -un) == dev && $(id -u) == 12345 && $(id -g) == 12345 ]] && touch /workspace/created-by-dev'
+          test "$before" = "$(stat -c '%u:%g' /tmp/personal-nvim/init.lua)"
+          test "$(stat -c '%u:%g' /tmp/test-workspace/created-by-dev)" = "12345:12345"

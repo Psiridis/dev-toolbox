@@ -1,0 +1,10 @@
+services:
+  dev:
+    environment:
+      SSH_AUTH_SOCK: /run/host-ssh-agent
+    volumes:
+      - type: bind
+        source: ${DEV_SSH_SOCKET:?Use the launcher to resolve the SSH agent}
+        target: /run/host-ssh-agent
+        bind:
+          create_host_path: false

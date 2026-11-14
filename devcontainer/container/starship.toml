@@ -1,0 +1,24 @@
+add_newline = false
+format = "$directory$git_branch$git_status$character"
+
+[directory]
+style = "bold cyan"
+truncation_length = 3
+truncation_symbol = "../"
+read_only = " ro"
+
+[git_branch]
+symbol = "git:"
+style = "bold purple"
+
+[git_status]
+style = "yellow"
+ahead = "^${count}"
+behind = "v${count}"
+diverged = "<>"
+renamed = "r"
+deleted = "x"
+
+[character]
+success_symbol = "[>](bold green)"
+error_symbol = "[>](bold red)"

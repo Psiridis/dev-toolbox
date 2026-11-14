@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+env_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+workspace=$PWD
+command_name=''
+image_option=''
+compose_option=''
+project_option=''
+confirm_reset=false
+usage() {
+    cat <<'USAGE'
+Usage: /path/to/dev-environment/dev COMMAND [OPTIONS]
+  build     Build the shared tools image locally (once per version/variant)
+  project-build  Build the dev service defined by a project Compose overlay
+  up        Start the selected workspace; use local image or pull if missing
+  pull      Pull the selected project's prebuilt image
+  shell     Open Zsh as dev (repeat for another terminal)
+  check     Run the image's toolchain smoke checks
+  diagnose  Save a report to the workspace's .dev-reports/dev-report.txt
+  down      Remove this workspace's containers, preserving volumes
+  status    Show this workspace's containers
+  config    Print runtime Compose configuration without requiring the engine
+  reset --yes  Remove this workspace's containers AND editor/state volumes
+Options (before or after COMMAND):
+  --workspace PATH   Existing project directory (default: current directory)
+  --image IMAGE      Explicit image tag/digest, overriding project defaults
+  --compose FILE     Project Compose overlay (default: workspace/compose.dev.yaml if present)
+  --project-name ID  Explicit container/volume namespace; normally derived from workspace
+  -h, --help         Show help
+
+Settings come from the selected workspace's .env, not the tools repo's .env.
+up never builds. Use build first for a local image, or select a published image.
+USAGE
+}
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help|help) usage; exit 0 ;;
+        --workspace|--image|--compose|--project-name)
+            [[ $# -ge 2 && -n "$2" ]] || { echo "$1 requires a value" >&2; exit 2; }
+            case "$1" in
+                --workspace) workspace=$2 ;;
+                --image) image_option=$2 ;;
+                --compose) compose_option=$2 ;;
+                --project-name) project_option=$2 ;;
+            esac
+            shift 2 ;;
+        --yes) confirm_reset=true; shift ;;
+        build|project-build|up|pull|shell|check|diagnose|down|status|config|reset)
+            [[ -z "$command_name" ]] || { usage >&2; exit 2; }
+            command_name=$1; shift ;;
+        *) usage >&2; exit 2 ;;
+    esac
+done
+[[ -n "$command_name" ]] || { usage; exit 0; }
+if [[ "$command_name" == reset ]]; then
+    [[ "$confirm_reset" == true ]] || { echo 'Reset deletes saved tools/history. Use reset --yes explicitly.' >&2; exit 2; }
+elif [[ "$confirm_reset" == true ]]; then
+    echo '--yes is only valid with reset.' >&2; exit 2
+fi
+[[ -d "$workspace" ]] || { echo "Workspace does not exist: $workspace" >&2; exit 2; }
+workspace=$(cd -- "$workspace" && pwd -P)
+export DEV_ENV_ROOT="$env_root" DEV_WORKSPACE="$workspace"
+IFS= read -r DEV_VERSION < "$env_root/VERSION"
+[[ "$DEV_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'VERSION must contain a stable MAJOR.MINOR.PATCH release.' >&2; exit 2; }
+export DEV_VERSION
+command -v docker >/dev/null || { echo 'Install Docker CLI and Compose first.' >&2; exit 1; }
+docker compose version >/dev/null
+
+# Explicitly select the workspace env file. Never execute it as shell code.
+settings_compose=(docker compose --project-directory "$workspace")
+if [[ -f "$workspace/.env" ]]; then
+    settings_compose+=(--env-file "$workspace/.env")
+else
+    settings_compose+=(--env-file /dev/null)
+fi
+settings_compose+=(-f "$env_root/devcontainer/compose.yaml")
+settings=$("${settings_compose[@]}" config --environment)
+setting() {
+    printf '%s\n' "$settings" | awk -v name="$1" 'index($0,name "=")==1 { print substr($0,length(name)+2); exit }'
+}
+export INSTALL_NODE="$(setting INSTALL_NODE)"
+INSTALL_NODE=${INSTALL_NODE:-false}
+case "$INSTALL_NODE" in true|false) ;; *) echo 'INSTALL_NODE must be true or false.' >&2; exit 2;; esac
+forward_agent=$(setting FORWARD_SSH_AGENT)
+case "${forward_agent:-true}" in true|false) ;; *) echo 'FORWARD_SSH_AGENT must be true or false.' >&2; exit 2;; esac
+configured_image=$(setting DEV_IMAGE)
+local_image="dev-toolchain:$DEV_VERSION"
+[[ "$INSTALL_NODE" == false ]] || local_image="${local_image}-node"
+export DEV_IMAGE="${image_option:-${configured_image:-$local_image}}"
+
+# Scope containers and data to one canonical workspace path, even for equal basenames.
+slug=$(basename "$workspace" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g' | cut -c1-32)
+workspace_id=$(printf '%s' "$workspace" | cksum | awk '{print $1}')
+configured_project=$(setting DEV_PROJECT_NAME)
+export DEV_PROJECT_NAME="${project_option:-${configured_project:-dev-${slug}-${workspace_id}}}"
+[[ "$DEV_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || { echo 'Project name must use lowercase letters, digits, underscores, or dashes.' >&2; exit 2; }
+case "$(uname -s)" in
+    Darwin) export DEV_UID=1000 DEV_GID=1000 ;;
+    Linux)
+        [[ $(id -u) != 0 ]] || { echo 'Run the launcher as your regular host user.' >&2; exit 1; }
+        export DEV_UID="$(id -u)" DEV_GID="$(id -g)" ;;
+    *) echo 'Supported hosts: macOS with Docker Desktop, or native Linux.' >&2; exit 1 ;;
+esac
+case "$(uname -m)" in
+    arm64|aarch64) export DEV_ARCH=arm64 ;;
+    x86_64|amd64) export DEV_ARCH=amd64 ;;
+    *) echo 'Supported CPU architectures: ARM64 and AMD64.' >&2; exit 1 ;;
+esac
+if [[ -n ${DOCKER_DEFAULT_PLATFORM:-} && "$DOCKER_DEFAULT_PLATFORM" != "linux/$DEV_ARCH" ]]; then
+    echo 'Unset DOCKER_DEFAULT_PLATFORM or select the native platform; cross-architecture execution is not configured.' >&2
+    exit 2
+fi
+if [[ "$command_name" != config ]]; then
+    if ! docker info >/dev/null 2>&1; then
+        echo 'Docker engine unavailable. Start it first (macOS: docker desktop start).' >&2
+        exit 1
+    fi
+    endpoint=${DOCKER_HOST:-$(docker context inspect --format '{{.Endpoints.docker.Host}}')}
+    case "$endpoint" in unix://*) ;; *) echo 'Use a local Docker engine: remote host bind mounts are unsupported.' >&2; exit 1;; esac
+    engine_arch=$(docker info --format '{{.Architecture}}')
+    case "$engine_arch" in aarch64) engine_arch=arm64;; x86_64) engine_arch=amd64;; esac
+    [[ "$engine_arch" == "$DEV_ARCH" ]] || { echo 'Use a Docker engine with the native host architecture.' >&2; exit 1; }
+fi
+compose=("${settings_compose[@]}" --project-name "$DEV_PROJECT_NAME")
+
+# Build only the reusable image, never an application's Compose build settings.
+if [[ "$command_name" == build ]]; then
+    compose+=(-f "$env_root/devcontainer/compose.build.yaml")
+    "${compose[@]}" build dev
+    printf 'Built %s. Start a project with up --workspace PATH --image %s\n' "$DEV_IMAGE" "$DEV_IMAGE"
+    exit 0
+fi
+if [[ -n "$compose_option" ]]; then
+    [[ "$compose_option" == /* ]] || compose_option="$workspace/$compose_option"
+    [[ -f "$compose_option" ]] || { echo "Compose overlay not found: $compose_option" >&2; exit 2; }
+    compose+=(-f "$compose_option")
+elif [[ -f "$workspace/compose.dev.yaml" ]]; then
+    compose+=(-f "$workspace/compose.dev.yaml")
+fi
+if [[ -n "$image_option" || -n "$configured_image" ]]; then
+    compose+=(-f "$env_root/devcontainer/compose.image.yaml")
+fi
+config_path=$(setting NVIM_CONFIG_PATH)
+config_path=${config_path:-"$HOME/.config/nvim"}
+case "$config_path" in /*) ;; *) echo 'NVIM_CONFIG_PATH must be an absolute host path.' >&2; exit 2;; esac
+if [[ -f "$config_path/init.lua" || -f "$config_path/init.vim" ]]; then
+    export RESOLVED_NVIM_CONFIG="$config_path"
+    compose+=(-f "$env_root/devcontainer/compose.nvim.yaml")
+else
+    printf 'Neovim configuration not found at %s; using plain Neovim.\n' "$config_path" >&2
+fi
+unset DEV_SSH_SOCKET
+if [[ "${forward_agent:-true}" == true ]] && command -v ssh-add >/dev/null && ssh-add -l >/dev/null 2>&1; then
+    if [[ "$(uname -s)" == Darwin ]]; then
+        export DEV_SSH_SOCKET=/run/host-services/ssh-auth.sock
+    elif [[ -S "${SSH_AUTH_SOCK:-}" ]]; then
+        export DEV_SSH_SOCKET="$SSH_AUTH_SOCK"
+    fi
+fi
+if [[ -n "${DEV_SSH_SOCKET:-}" ]]; then
+    compose+=(-f "$env_root/devcontainer/compose.ssh.yaml")
+else
+    echo 'SSH forwarding unavailable or disabled; local development is still available.' >&2
+fi
+export HOST_GIT_NAME='' HOST_GIT_EMAIL=''
+if command -v git >/dev/null; then
+    HOST_GIT_NAME=$(git -C "$workspace" config --includes --get user.name || true)
+    HOST_GIT_EMAIL=$(git -C "$workspace" config --includes --get user.email || true)
+fi
+if [[ -z "$HOST_GIT_NAME" || -z "$HOST_GIT_EMAIL" ]]; then
+    echo 'Git author identity incomplete. Set user.name and user.email on the host before committing.' >&2
+fi
+case "$command_name" in
+    project-build) "${compose[@]}" build dev ;;
+    up) "${compose[@]}" up -d --no-build dev ;;
+    pull) "${compose[@]}" pull dev ;;
+    shell) "${compose[@]}" exec --user dev --workdir /workspace dev zsh ;;
+    check) "${compose[@]}" exec -T --user dev --workdir /workspace dev dev-check ;;
+    diagnose) "${compose[@]}" exec -T --user dev --workdir /workspace dev dev-diagnose ;;
+    down) "${compose[@]}" down ;;
+    status) "${compose[@]}" ps ;;
+    config) "${compose[@]}" config ;;
+    reset) "${compose[@]}" down --volumes ;;
+esac

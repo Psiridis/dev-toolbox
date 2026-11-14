@@ -1,0 +1,18 @@
+# Shared shell defaults; personal Neovim settings remain on the host.
+autoload -Uz compinit
+compinit
+bindkey -e
+HISTFILE="$HOME/.local/state/zsh/history"
+HISTSIZE=20000
+SAVEHIST=20000
+setopt APPEND_HISTORY SHARE_HISTORY HIST_IGNORE_DUPS HIST_IGNORE_SPACE
+zstyle ':completion:*' menu select
+alias ls='ls --color=auto'
+alias ll='ls -lah --color=auto'
+export FZF_DEFAULT_OPTS='--height=40% --layout=reverse --border'
+source /usr/share/doc/fzf/examples/key-bindings.zsh
+source /usr/share/doc/fzf/examples/completion.zsh
+source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+eval "$(starship init zsh)"
+# Load highlighting after other widgets are installed.
+source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh

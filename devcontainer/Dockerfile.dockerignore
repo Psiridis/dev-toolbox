@@ -1,0 +1,10 @@
+**
+!devcontainer/
+!devcontainer/Dockerfile
+!devcontainer/container/
+!devcontainer/container/**
+!devcontainer/scripts/
+!devcontainer/scripts/check-container.sh
+!devcontainer/scripts/diagnose.py
+!devcontainer/scripts/diagnose-init.lua
+!devcontainer/scripts/diagnose-nvim.lua

@@ -1,0 +1,4 @@
+# An explicit --image/DEV_IMAGE overrides a project's default image selection.
+services:
+  dev:
+    image: ${DEV_IMAGE:?Specify an image}

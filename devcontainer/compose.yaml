@@ -1,0 +1,30 @@
+# Shared runtime defaults. Host paths are resolved by the launcher.
+services:
+  dev:
+    image: ${DEV_IMAGE:-dev-toolchain:0.1.0}
+    pull_policy: missing
+    init: true
+    # Bootstrap maps the dev UID/GID, then drops privileges before running tools.
+    user: root
+    working_dir: /workspace
+    cap_add:
+      - SYS_PTRACE
+    environment:
+      DEV_HOST_UID: ${DEV_UID:-1000}
+      DEV_HOST_GID: ${DEV_GID:-1000}
+      HOST_GIT_NAME: ${HOST_GIT_NAME:-}
+      HOST_GIT_EMAIL: ${HOST_GIT_EMAIL:-}
+    volumes:
+      - type: bind
+        source: ${DEV_WORKSPACE:-.}
+        target: /workspace
+        bind:
+          create_host_path: false
+      - nvim-data:/home/dev/.local/share/nvim
+      - dev-state:/home/dev/.local/state
+
+volumes:
+  nvim-data:
+    name: ${DEV_PROJECT_NAME:-dev-toolchain}-nvim-data-${DEV_ARCH:-native}
+  dev-state:
+    name: ${DEV_PROJECT_NAME:-dev-toolchain}-dev-state-${DEV_ARCH:-native}

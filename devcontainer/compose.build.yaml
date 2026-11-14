@@ -1,0 +1,9 @@
+# Used only by ./dev build. Consumer workspaces never need image source files.
+services:
+  dev:
+    build:
+      context: ${DEV_ENV_ROOT:?Use the dev launcher}
+      dockerfile: devcontainer/Dockerfile
+      args:
+        INSTALL_NODE: ${INSTALL_NODE:-false}
+        IMAGE_VERSION: ${DEV_VERSION:?Use the dev launcher}

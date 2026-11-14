@@ -1,0 +1,49 @@
+# Local environment settings; keep safe examples in version control.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Python environments, bytecode, and generated tool caches.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+
+# Build outputs and generated compiler/CMake metadata.
+build/
+dist/
+install/
+log/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+
+# Optional Node.js dependency downloads.
+node_modules/
+
+# Local OS/editor artifacts; shared editor configuration may still be tracked.
+.DS_Store
+._*
+*.swp
+*.swo
+*.swn
+*~
+nvim.log
+
+# Generated diagnostics; retain the empty reports directory.
+.dev-reports/
+dev-report*.txt
+/docker-status*.txt
+/reports/*
+!/reports/.gitkeep

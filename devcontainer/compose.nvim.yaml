@@ -1,0 +1,8 @@
+services:
+  dev:
+    volumes:
+      - type: bind
+        source: ${RESOLVED_NVIM_CONFIG:?Use the launcher to resolve the editor configuration}
+        target: /home/dev/.config/nvim
+        bind:
+          create_host_path: false
