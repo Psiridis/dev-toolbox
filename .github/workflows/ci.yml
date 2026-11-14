@@ -20,6 +20,7 @@ jobs:
           persist-credentials: false
       - name: Host checks
         run: |
+          docker compose version
           bash -n dev devcontainer/container/*.sh devcontainer/scripts/check-container.sh
           python3 devcontainer/scripts/test-launcher.py
       - name: Read version

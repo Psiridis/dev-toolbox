@@ -231,6 +231,13 @@ base/Node builds, real external-workspace launcher tests, and UID/GID assertions
 Only explicitly disposable CI fixture volumes can be reset during automated tests;
 never delete existing user state as a routine verification step.
 
+Compose JSON serialization varies between versions: false-valued bind options
+such as create_host_path may be omitted. Assertions must accept that normalized
+form without accepting an explicitly true value. The first GitHub host-check
+failure exposed a direct optional-key lookup; it is corrected, and CI logs the
+Compose version for future diagnosis. A local pass is not confirmation that the
+subsequent GitHub image build or runtime checks have passed.
+
 The image embeds `dev-check` and `dev-diagnose`; their support Lua scripts are under
 `/opt/dev-environment/scripts`. Diagnostics write `.dev-reports/dev-report.txt`
 in the selected application (Git-ignore it using the consumer template). They use

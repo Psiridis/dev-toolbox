@@ -99,7 +99,8 @@ esac''')
         mount = next(m for m in config["services"]["dev"]["volumes"] if m["target"] == "/workspace")
         self.assertEqual(mount["source"], str(workspace))
         self.assertNotEqual(mount["source"], str(self.root))
-        self.assertFalse(mount["bind"]["create_host_path"])
+        # Compose serializers may omit false-valued bind options entirely.
+        self.assertFalse(mount.get("bind", {}).get("create_host_path", False))
 
     def test_current_directory_is_default_workspace(self):
         workspace = self.workspace()
